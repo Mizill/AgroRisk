@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Агрориск — декадный индекс риска</title>
+<style>
+/* Палитра взята из предмета: выгоревшая степная трава, чернозём и шкала
+   созревания хлеба от зелёного до выжженного. Синий оставлен только
+   управляющим элементам, чтобы его нельзя было спутать с тревогой. */
+:root{
+  --paper:#edf0ea; --panel:#e4e8de; --sunk:#d9ddd1;
+  --ink:#2b2118; --soft:#6e6456; --rule:#c6ccbb;
+  --control:#2e5c6e; --control-ink:#f4f7f2;
+  --r1:#4a7c4e; --r2:#8a9a35; --r3:#d09b1c; --r4:#c4662a; --r5:#8e2d20;
+  --track:176px;
+  --hatch:rgba(255,255,255,.62);
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#16140f; --panel:#201d16; --sunk:#2a2619;
+    --ink:#ece5d8; --soft:#9d9384; --rule:#3a3427;
+    --control:#7fb2c4; --control-ink:#12100c;
+    --r1:#6fa06f; --r2:#a8b850; --r3:#e2b23c; --r4:#dc8148; --r5:#c1523f;
+    --hatch:rgba(0,0,0,.45);
+  }
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Segoe UI","Noto Sans",Ubuntu,Cantarell,system-ui,-apple-system,sans-serif;
+  font-size:15px; line-height:1.5; font-variant-numeric:tabular-nums;
+  -webkit-text-size-adjust:100%;
+}
+h1,h2,h3{margin:0; font-weight:620; letter-spacing:-.01em}
+button,input,select{font:inherit; color:inherit}
+
+/* ---------- панель управления ---------- */
+.bar{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  padding:10px 18px calc(10px + env(safe-area-inset-top,0px));
+  background:var(--panel); border-bottom:1px solid var(--rule);
+}
+.mark{display:flex; align-items:baseline; gap:8px; margin-right:6px}
+.mark b{font-size:18px; font-weight:680; letter-spacing:-.02em}
+.mark span{font-size:12px; color:var(--soft)}
+.finder{position:relative; flex:1 1 280px; min-width:200px}
+.finder input{
+  width:100%; padding:9px 12px; background:var(--paper);
+  border:1px solid var(--rule); border-radius:3px;
+}
+.finder input:focus-visible{outline:2px solid var(--control); outline-offset:1px}
+.hints{
+  position:absolute; left:0; right:0; top:calc(100% + 4px); margin:0; padding:4px;
+  list-style:none; background:var(--panel); border:1px solid var(--rule);
+  border-radius:3px; box-shadow:0 10px 24px rgba(0,0,0,.18); max-height:260px;
+  overflow:auto; z-index:30;
+}
+.hints:empty{display:none}
+.hints li button{
+  display:block; width:100%; text-align:left; padding:7px 9px;
+  background:none; border:0; border-radius:2px; cursor:pointer;
+}
+.hints li button:hover,.hints li button:focus-visible{background:var(--sunk); outline:none}
+.hints small{display:block; color:var(--soft); font-size:12px}
+.go{
+  padding:9px 18px; background:var(--control); color:var(--control-ink);
+  border:0; border-radius:3px; cursor:pointer; font-weight:600;
+}
+.go[disabled]{opacity:.55; cursor:progress}
+.ghost{
+  padding:9px 12px; background:none; border:1px solid var(--rule);
+  border-radius:3px; cursor:pointer; color:var(--soft);
+}
+.ghost[aria-expanded="true"]{color:var(--ink); border-color:var(--control)}
+.go:focus-visible,.ghost:focus-visible,.actions a:focus-visible,
+.sheet summary:focus-visible{outline:2px solid var(--control); outline-offset:2px}
+
+/* ---------- настройки ---------- */
+.tuning{
+  padding:14px 18px; background:var(--sunk); border-bottom:1px solid var(--rule);
+  display:grid; gap:12px 20px; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+}
+.tuning[hidden]{display:none}
+.tuning label{display:block; font-size:13px; color:var(--soft)}
+.tuning label span{display:block; margin-bottom:3px}
+.tuning input,.tuning select{
+  width:100%; padding:6px 8px; background:var(--paper);
+  border:1px solid var(--rule); border-radius:3px;
+}
+.tuning .check{display:flex; align-items:center; gap:8px; align-self:end; color:var(--ink)}
+.tuning .check input{width:auto}
+
+/* ---------- общие блоки ---------- */
+main{max-width:1180px; margin:0 auto; padding:24px 18px 64px}
+.note{color:var(--soft); font-size:13px}
+.state{padding:44px 0; max-width:62ch}
+.state h2{font-size:22px; margin-bottom:8px}
+.state p{margin:0 0 6px}
+.state.fail h2{color:var(--r5)}
+.steps{margin:14px 0 0; padding:0; list-style:none; font-size:13px; color:var(--soft)}
+.steps li{padding:2px 0}
+.steps li:last-child{color:var(--ink)}
+
+/* ---------- лента декад ---------- */
+.head{display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 14px; margin-bottom:4px}
+.head h2{font-size:21px}
+.ribbon-wrap{margin:18px 0 0; position:relative; padding-left:26px}
+.grid-line{
+  position:absolute; left:26px; right:0; border-top:1px dashed var(--rule);
+  font-size:11px; color:var(--soft); pointer-events:none;
+}
+.grid-line b{position:absolute; left:-26px; top:-8px; font-weight:400}
+.ribbon-scroll{overflow-x:auto; overflow-y:hidden; padding-bottom:2px}
+.ribbon{
+  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(7px,1fr);
+  gap:2px; height:var(--track); align-items:end; min-width:100%;
+  border-bottom:2px solid var(--ink); position:relative;
+}
+.cell{
+  position:relative; height:100%; padding:0; background:none; border:0;
+  display:flex; align-items:flex-end; cursor:pointer;
+}
+.cell .bar{
+  display:block; width:100%; height:var(--h); min-height:2px;
+  background:var(--c); border-radius:1px 1px 0 0;
+  transition:height .5s cubic-bezier(.2,.7,.3,1);
+}
+.cell.ahead .bar{
+  background-image:repeating-linear-gradient(135deg,var(--hatch) 0 2px,transparent 2px 5px);
+}
+.cell:hover .bar{filter:brightness(1.12)}
+.cell[aria-pressed="true"]{background:color-mix(in srgb,var(--ink) 9%,transparent)}
+.cell[aria-pressed="true"] .bar{box-shadow:inset 0 0 0 2px var(--ink)}
+.cell:focus-visible{outline:2px solid var(--control); outline-offset:1px}
+.months{
+  display:grid; grid-auto-flow:column; grid-auto-columns:minmax(7px,1fr); gap:2px;
+  margin:5px 0 0; min-width:100%; font-size:11px; color:var(--soft); height:16px;
+}
+.months span{white-space:nowrap}
+.legend{
+  display:flex; flex-wrap:wrap; gap:6px 16px; margin:16px 0 0;
+  font-size:12px; color:var(--soft);
+}
+.legend span{display:flex; align-items:center; gap:6px}
+.legend .sw{width:13px; height:13px; border-radius:2px; background:var(--c); flex:none}
+.legend .sw.ahead{
+  background-image:repeating-linear-gradient(135deg,var(--hatch) 0 2px,transparent 2px 5px);
+  background-color:var(--soft);
+}
+
+/* ---------- карточка декады ---------- */
+.detail{
+  margin:26px 0 0; padding:20px; background:var(--panel);
+  border:1px solid var(--rule); border-left:5px solid var(--c);
+  display:grid; gap:22px; grid-template-columns:minmax(200px,260px) 1fr;
+}
+.score{display:flex; align-items:baseline; gap:10px}
+.score b{font-size:52px; font-weight:660; line-height:1; letter-spacing:-.03em}
+.score em{font-style:normal; font-size:17px; color:var(--c); font-weight:600}
+.detail h3{font-size:16px; margin-bottom:2px}
+.sub{margin:16px 0 0; display:grid; gap:9px}
+.sub div{display:grid; grid-template-columns:80px 1fr 34px; gap:9px; align-items:center; font-size:13px}
+.sub .k{color:var(--soft)}
+.sub .t{height:7px; background:var(--sunk); border-radius:4px; overflow:hidden}
+.sub .t::after{content:""; display:block; height:100%; width:var(--w); background:var(--c2)}
+.sub .v{text-align:right}
+.facts{margin:0; display:grid; gap:10px 22px; grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.facts div{border-top:1px solid var(--rule); padding-top:7px}
+.facts dt{font-size:12px; color:var(--soft)}
+.facts dd{margin:1px 0 0; font-size:15px}
+.flags{margin:16px 0 0; padding:0; list-style:none; display:grid; gap:5px; font-size:13px}
+.flags li{padding-left:15px; position:relative}
+.flags li::before{content:"—"; position:absolute; left:0; color:var(--c)}
+
+/* ---------- таблица ---------- */
+.sheet{margin:26px 0 0; border-top:1px solid var(--rule); padding-top:14px}
+.sheet summary{cursor:pointer; font-weight:600}
+.scroll{overflow-x:auto; margin-top:12px}
+table{border-collapse:collapse; width:100%; font-size:13px; min-width:760px}
+th,td{padding:6px 10px; text-align:right; border-bottom:1px solid var(--rule); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--soft); font-weight:500; position:sticky; top:0; background:var(--paper)}
+tbody tr.on td{background:var(--sunk)}
+td .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--c); margin-right:7px}
+.actions{margin:18px 0 0; display:flex; gap:12px; flex-wrap:wrap}
+.actions a{
+  padding:8px 14px; border:1px solid var(--control); border-radius:3px;
+  color:var(--control); text-decoration:none;
+}
+.actions a:hover{background:var(--control); color:var(--control-ink)}
+
+@media (max-width:720px){
+  .detail{grid-template-columns:1fr; padding:16px}
+  .score b{font-size:42px}
+  main{padding:18px 12px 48px}
+  .bar{padding-left:12px; padding-right:12px}
+}
+@media (prefers-reduced-motion:reduce){
+  .cell .bar{transition:none}
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="mark"><b>Агрориск</b><span id="mark-sub">декадный индекс</span></div>
+  <div class="finder">
+    <input id="q" type="search" autocomplete="off" spellcheck="false"
+           placeholder="Населённый пункт или координаты" aria-label="Место расчёта">
+    <ul class="hints" id="hints" role="listbox" aria-label="Совпадения"></ul>
+  </div>
+  <button class="go" id="go" type="button">Рассчитать</button>
+  <button class="ghost" id="tune" type="button" aria-expanded="false" aria-controls="tuning">Настройки</button>
+</header>
+
+<section class="tuning" id="tuning" hidden>
+  <label><span>Глубина отчёта, суток</span><input id="history_days" type="number" min="10" max="3650" value="60"></label>
+  <label><span>Прогноз, суток</span><input id="forecast_days" type="number" min="0" max="16" value="10"></label>
+  <label><span>Норма, лет</span><input id="climatology_years" type="number" min="1" max="40" value="15"></label>
+  <label><span>Окно калибровки, суток</span><input id="calibration_days" type="number" min="60" max="7300" value="730"></label>
+  <label><span>Калибровка сети</span>
+    <select id="pinn_calibration">
+      <option value="climatology">по климатологии точки</option>
+      <option value="sigmoid">сигмоида</option>
+      <option value="raw">сырой выход</option>
+    </select>
+  </label>
+  <label><span>Покров 0–1, пусто — по фенологии</span><input id="cover" type="number" min="0" max="1" step="0.05" placeholder="по фенологии"></label>
+  <label><span>День года первого снега</span><input id="first_snow_doy" type="number" min="150" max="366" value="300"></label>
+  <label><span>Название хозяйства</span><input id="farm" type="text" placeholder="по названию места"></label>
+  <label class="check"><input id="no_model" type="checkbox"> Считать без нейросети</label>
+</section>
+
+<main>
+  <section class="state" id="idle">
+    <h2>Введите место — и увидите риск по декадам</h2>
+    <p>Программа возьмёт из Open-Meteo погоду и влажность почвы, сравнит декаду
+       с климатической нормой этой же точки и оценит деградацию почвы нейросетью.</p>
+    <p class="note" id="idle-note">Можно ввести название посёлка или пару координат, например 51.17 71.45.</p>
+  </section>
+
+  <section class="state" id="busy" hidden>
+    <h2>Считаю</h2>
+    <p class="note">Первый запрос тянет два года почасовых данных и климатическую норму — это занимает до минуты.</p>
+    <ul class="steps" id="steps"></ul>
+  </section>
+
+  <section class="state fail" id="fail" hidden>
+    <h2>Расчёт не прошёл</h2>
+    <p id="fail-text"></p>
+    <p class="note" id="fail-hint"></p>
+  </section>
+
+  <section id="out" hidden>
+    <div class="head">
+      <h2 id="out-farm"></h2>
+      <span class="note" id="out-meta"></span>
+    </div>
+
+    <div class="ribbon-wrap">
+      <div class="grid-line" style="top:calc(var(--track) * .40)"><b>60</b></div>
+      <div class="grid-line" style="top:calc(var(--track) * .60)"><b>40</b></div>
+      <div class="ribbon-scroll">
+        <div class="ribbon" id="ribbon" role="group" aria-label="Декады: высота столбца — композитный индекс"></div>
+        <div class="months" id="months" aria-hidden="true"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="detail" id="detail"></div>
+
+    <details class="sheet">
+      <summary>Все декады таблицей</summary>
+      <div class="scroll"><table id="sheet"></table></div>
+    </details>
+
+    <div class="actions"><a id="csv" href="#" download>Скачать CSV</a></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const CATS = [
+  {name:"низкий",      max:20,  v:"--r1"},
+  {name:"умеренный",   max:40,  v:"--r2"},
+  {name:"повышенный",  max:60,  v:"--r3"},
+  {name:"высокий",     max:80,  v:"--r4"},
+  {name:"критический", max:101, v:"--r5"}
+];
+const MONTHS = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+const $ = id => document.getElementById(id);
+const state = {job:null, data:null, pick:0, timer:null, place:null, misses:0};
+
+function catOf(score){ return CATS.find(c => score < c.max) || CATS[4]; }
+function colorOf(score){ return `var(${catOf(score).v})`; }
+function num(value, digits = 0){
+  if (value === null || value === undefined) return "—";
+  return Number(value).toFixed(digits).replace(".", ",");
+}
+function show(id){
+  ["idle","busy","fail","out"].forEach(key => $(key).hidden = (key !== id));
+}
+
+/* ---------- подсказки по названию ---------- */
+let hintTimer = null;
+$("q").addEventListener("input", () => {
+  clearTimeout(hintTimer);
+  const query = $("q").value.trim();
+  state.place = null;                       // текст правили — координаты подсказки больше не в силе
+  if (query.length < 2 || /^[-\d.,;\s]+$/.test(query)){ $("hints").innerHTML = ""; return; }
+  hintTimer = setTimeout(() => suggest(query), 280);
+});
+$("q").addEventListener("keydown", event => {
+  if (event.key === "Enter"){ $("hints").innerHTML = ""; run(); }
+  if (event.key === "Escape") $("hints").innerHTML = "";
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest(".finder")) $("hints").innerHTML = "";
+});
+
+async function suggest(query){
+  let places = [];
+  try {
+    const answer = await fetch("/api/places?q=" + encodeURIComponent(query)).then(r => r.json());
+    places = answer.places || [];
+  } catch (error){ return; }
+  if ($("q").value.trim() !== query) return;
+  $("hints").innerHTML = "";
+  places.forEach(place => {
+    const where = [place.admin1, place.country].filter(Boolean).join(", ");
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.innerHTML = "";
+    button.append(place.name || query);
+    const small = document.createElement("small");
+    small.textContent = `${where} · ${num(place.lat, 3)}, ${num(place.lon, 3)}`;
+    button.append(small);
+    button.onclick = () => {
+      const title = [place.name, where].filter(Boolean).join(", ");
+      $("q").value = title;
+      state.place = {lat:place.lat, lon:place.lon, title:title};
+      $("hints").innerHTML = "";
+      run();
+    };
+    item.append(button);
+    $("hints").append(item);
+  });
+}
+
+/* ---------- запуск расчёта ---------- */
+$("go").onclick = run;
+$("tune").onclick = () => {
+  const open = $("tuning").hidden;
+  $("tuning").hidden = !open;
+  $("tune").setAttribute("aria-expanded", String(open));
+};
+
+function settings(){
+  const cover = $("cover").value.trim();
+  const chosen = state.place && state.place.title === $("q").value.trim() ? state.place : null;
+  return {
+    query: $("q").value.trim(),
+    lat: chosen ? chosen.lat : null,
+    lon: chosen ? chosen.lon : null,
+    farm: $("farm").value.trim(),
+    history_days: $("history_days").value,
+    forecast_days: $("forecast_days").value,
+    climatology_years: $("climatology_years").value,
+    calibration_days: $("calibration_days").value,
+    pinn_calibration: $("pinn_calibration").value,
+    first_snow_doy: $("first_snow_doy").value,
+    cover: cover === "" ? null : cover,
+    no_model: $("no_model").checked
+  };
+}
+
+async function run(){
+  const request = settings();
+  if (!request.query){
+    $("q").focus();
+    fail("Не указано место.", "Введите название посёлка или пару координат.");
+    return;
+  }
+  clearInterval(state.timer);
+  state.misses = 0;
+  $("go").disabled = true;
+  $("steps").innerHTML = "";
+  show("busy");
+  try {
+    const started = await fetch("/api/run", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(request)
+    }).then(r => r.json());
+    if (started.error) throw new Error(started.error);
+    state.job = started.job;
+    state.timer = setInterval(poll, 600);
+    poll();
+  } catch (error){
+    $("go").disabled = false;
+    fail("Сервер не ответил.", "Проверьте, что окно с запущенным web.py не закрыто.");
+  }
+}
+
+async function poll(){
+  let job;
+  try { job = await fetch("/api/job?id=" + state.job).then(r => r.json()); }
+  catch (error){
+    if (++state.misses < 8) return;
+    clearInterval(state.timer);
+    $("go").disabled = false;
+    fail("Связь с сервером потеряна.",
+         "Окно, где запущен web.py, закрыто или порт занят. Запустите его снова.");
+    return;
+  }
+  state.misses = 0;
+  $("steps").innerHTML = "";
+  (job.log || []).slice(-6).forEach(line => {
+    const item = document.createElement("li");
+    item.textContent = line;
+    $("steps").append(item);
+  });
+  if (job.state === "running") return;
+  clearInterval(state.timer);
+  $("go").disabled = false;
+  if (job.state === "error"){
+    fail(job.error || "Неизвестная ошибка.", hintFor(job.error || ""));
+  } else {
+    state.data = job.result;
+    state.pick = Math.max(0, state.data.decades.length - 1);
+    draw();
+  }
+}
+
+function hintFor(message){
+  if (/не найден/i.test(message)) return "Уточните название или введите координаты через пробел.";
+  if (/Open-Meteo/i.test(message)) return "Похоже, нет доступа в интернет. Проверьте соединение и повторите.";
+  return "Измените настройки и попробуйте ещё раз.";
+}
+
+function fail(text, hint){
+  $("fail-text").textContent = text;
+  $("fail-hint").textContent = hint || "";
+  show("fail");
+}
+
+/* ---------- отрисовка ---------- */
+function draw(){
+  const data = state.data;
+  const rows = data.decades;
+  $("out-farm").textContent = data.farm;
+  const bits = [data.place.title || `${num(data.place.lat,3)}, ${num(data.place.lon,3)}`,
+                `${rows.length} декад`,
+                data.model ? `сеть ${data.model}` : "без нейросети",
+                data.generated_at];
+  $("out-meta").textContent = bits.join(" · ");
+  $("csv").href = "/api/report.csv?id=" + state.job;
+
+  const ribbon = $("ribbon"); ribbon.innerHTML = "";
+  const months = $("months"); months.innerHTML = "";
+  rows.forEach((row, index) => {
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "cell" + (row.source === "прогноз" ? " ahead" : "");
+    cell.style.setProperty("--c", colorOf(row.composite));
+    cell.style.setProperty("--h", "0%");
+    cell.dataset.index = index;
+    cell.setAttribute("aria-pressed", String(index === state.pick));
+    cell.title = `${row.decade_label}: ${num(row.composite,1)}, ${row.category}`;
+    cell.setAttribute("aria-label",
+      `${row.decade_label}, индекс ${num(row.composite,1)}, ${row.category}`);
+    const bar = document.createElement("span");
+    bar.className = "bar";
+    cell.append(bar);
+    cell.onclick = () => { state.pick = index; paintPick(); };
+    cell.onkeydown = event => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = Math.min(rows.length - 1, Math.max(0, index + step));
+      state.pick = next;
+      paintPick();
+      ribbon.children[next].focus();
+    };
+    ribbon.append(cell);
+
+    const label = document.createElement("span");
+    const start = new Date(row.decade_start + "T00:00:00");
+    label.textContent = start.getDate() <= 10 ? MONTHS[start.getMonth()] : "";
+    months.append(label);
+  });
+
+  $("legend").innerHTML = "";
+  CATS.forEach(category => {
+    const item = document.createElement("span");
+    item.innerHTML = "";
+    const swatch = document.createElement("span");
+    swatch.className = "sw";
+    swatch.style.setProperty("--c", `var(${category.v})`);
+    item.append(swatch, document.createTextNode(category.name));
+    $("legend").append(item);
+  });
+  const ahead = document.createElement("span");
+  const hatch = document.createElement("span");
+  hatch.className = "sw ahead";
+  ahead.append(hatch, document.createTextNode("прогноз"));
+  $("legend").append(ahead);
+
+  sheet(rows);
+  show("out");
+  requestAnimationFrame(() => {
+    ribbon.querySelectorAll(".cell").forEach((cell, index) => {
+      cell.style.setProperty("--h", Math.max(1.5, rows[index].composite) + "%");
+    });
+  });
+  paintPick();
+}
+
+function paintPick(){
+  const rows = state.data.decades;
+  document.querySelectorAll("#ribbon .cell").forEach((cell, index) =>
+    cell.setAttribute("aria-pressed", String(index === state.pick)));
+  document.querySelectorAll("#sheet tbody tr").forEach((line, index) =>
+    line.classList.toggle("on", index === state.pick));
+  detail(rows[state.pick]);
+}
+
+function detail(row){
+  const color = colorOf(row.composite);
+  const box = $("detail");
+  box.style.setProperty("--c", color);
+  const norm = row.precip_norm_mm;
+  const ratio = norm ? ` (${num(100 * row.precip_mm / norm)} % нормы)` : "";
+  const parts = [
+    ["Осадки", `${num(row.precip_mm,1)} мм${norm ? ` при норме ${num(norm,1)}` : ""}${ratio}`],
+    ["Средняя температура", `${num(row.temp_mean_c,1)} °C`],
+    ["Влажность почвы 0–7 см", row.soil_moisture_frac === null ? "нет данных"
+      : `${num(row.soil_moisture_frac,3)} м³/м³`],
+    ["Суховейных суток", `${row.sukhovey_days} из ${row.n_days}`],
+    ["Деградация почвы, сеть", row.degradation_index === null ? "не считалась"
+      : num(row.degradation_index, 2)],
+    ["Данные", row.source]
+  ];
+
+  box.innerHTML = "";
+  const left = document.createElement("div");
+  const score = document.createElement("p");
+  score.className = "score";
+  score.innerHTML = "";
+  const big = document.createElement("b"); big.textContent = num(row.composite, 0);
+  const word = document.createElement("em"); word.textContent = row.category;
+  score.append(big, word);
+  const title = document.createElement("h3"); title.textContent = row.decade_label;
+  const caption = document.createElement("p");
+  caption.className = "note";
+  caption.textContent = "композитный индекс, 0–100";
+  left.append(title, score, caption);
+
+  const subs = document.createElement("div");
+  subs.className = "sub";
+  [["Засуха", row.drought], ["Суховей", row.sukhovey], ["Ранний снег", row.early_snow]]
+    .forEach(([name, value]) => {
+      const line = document.createElement("div");
+      const label = document.createElement("span");
+      label.className = "k"; label.textContent = name;
+      const track = document.createElement("span");
+      track.className = "t";
+      track.style.setProperty("--w", Math.max(0, Math.min(100, value)) + "%");
+      track.style.setProperty("--c2", colorOf(value));
+      const amount = document.createElement("span");
+      amount.className = "v"; amount.textContent = num(value, 0);
+      line.append(label, track, amount);
+      subs.append(line);
+    });
+  left.append(subs);
+
+  const right = document.createElement("div");
+  const facts = document.createElement("dl");
+  facts.className = "facts";
+  parts.forEach(([term, value]) => {
+    const group = document.createElement("div");
+    const dt = document.createElement("dt"); dt.textContent = term;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    group.append(dt, dd);
+    facts.append(group);
+  });
+  right.append(facts);
+
+  if (row.notes){
+    const flags = document.createElement("ul");
+    flags.className = "flags";
+    row.notes.split(";").map(s => s.trim()).filter(Boolean).forEach(text => {
+      const item = document.createElement("li");
+      item.textContent = text;
+      flags.append(item);
+    });
+    right.append(flags);
+  }
+  box.append(left, right);
+}
+
+function sheet(rows){
+  const table = $("sheet");
+  const columns = [
+    ["Декада", r => r.decade_label], ["Данные", r => r.source],
+    ["Засуха", r => num(r.drought,0)], ["Суховей", r => num(r.sukhovey,0)],
+    ["Снег", r => num(r.early_snow,0)],
+    ["Деградация", r => r.degradation_index === null ? "—" : num(r.degradation_index,2)],
+    ["Индекс", r => num(r.composite,1)], ["Категория", r => r.category],
+    ["Осадки, мм", r => num(r.precip_mm,1)], ["Норма, мм", r => num(r.precip_norm_mm,1)],
+    ["Т, °C", r => num(r.temp_mean_c,1)],
+    ["Влага почвы", r => r.soil_moisture_frac === null ? "—" : num(r.soil_moisture_frac,3)]
+  ];
+  table.innerHTML = "";
+  const head = table.createTHead().insertRow();
+  columns.forEach(([name]) => {
+    const cell = document.createElement("th");
+    cell.textContent = name;
+    head.append(cell);
+  });
+  const body = table.createTBody();
+  rows.forEach((row, index) => {
+    const line = body.insertRow();
+    line.onclick = () => { state.pick = index; paintPick(); };
+    columns.forEach(([name, read], column) => {
+      const cell = line.insertCell();
+      if (column === 0){
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.setProperty("--c", colorOf(row.composite));
+        cell.append(dot);
+      }
+      cell.append(document.createTextNode(read(row)));
+    });
+  });
+}
+
+/* ---------- старт ---------- */
+(async function init(){
+  try {
+    const status = await fetch("/api/status").then(r => r.json());
+    $("mark-sub").textContent = "версия " + status.version;
+    if (!status.model){
+      $("no_model").checked = true;
+      $("idle-note").textContent =
+        "Файл pinn_model.pt рядом не найден — расчёт пойдёт без нейросети.";
+    }
+    if (status.last_place && status.last_place.query){
+      $("q").value = status.last_place.query;
+      state.place = {lat:status.last_place.lat, lon:status.last_place.lon,
+                     title:status.last_place.query};
+    }
+  } catch (error){ /* страница работает и без статуса */ }
+  $("q").focus();
+})();
+</script>
+</body>
+</html>
